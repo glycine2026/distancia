@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 
-st.set_page_config(layout="wide")
+st.set_page_config(page_title="Simulador logístico", layout="wide")
 
 # =========================
 # Cargar Excel
@@ -11,42 +11,24 @@ df = pd.read_excel("km_26.xlsx", sheet_name="Hoja1")
 tarifas = pd.read_excel("km_26.xlsx", sheet_name="Hoja2")
 
 df.columns = df.columns.str.strip()
+tarifas.columns = tarifas.columns.str.strip()
 
-tarifa_pesos_km = tarifas.iloc[0]["Importe"]
+# ordenar tarifas por km
+tarifas = tarifas.sort_values("Km")
 
 # =========================
 # Sidebar parámetros
 # =========================
 
-st.sidebar.header("Parámetros")
+st.sidebar.header("Parámetros económicos")
 
-tipo_cambio = st.sidebar.number_input(
-    "Tipo de cambio",
-    value=1380.0
-)
+precio = st.sidebar.number_input("Precio (USD)", value=200.0)
 
-precio = st.sidebar.number_input(
-    "Precio (USD)",
-    value=200.0
-)
+paritaria = st.sidebar.number_input("Paritaria (USD)", value=3.0)
 
-paritaria = st.sidebar.number_input(
-    "Paritaria (USD)",
-    value=3.0
-)
+secada = st.sidebar.number_input("Secada (USD)", value=4.0)
 
-secada = st.sidebar.number_input(
-    "Secada (USD)",
-    value=4.0
-)
-
-comision = st.sidebar.number_input(
-    "Comisión %",
-    value=1.0
-) / 100
-
-# tarifa USD/km
-tarifa_usd_km = tarifa_pesos_km / tipo_cambio
+comision = st.sidebar.number_input("Comisión (%)", value=1.0) / 100
 
 # =========================
 # Selección campo
@@ -62,7 +44,7 @@ campo = st.selectbox(
 df_campo = df[df["Campo"] == campo]
 
 # =========================
-# MULTI DESTINO
+# Selección destinos
 # =========================
 
 destinos = st.multiselect(
@@ -72,14 +54,22 @@ destinos = st.multiselect(
 
 resultados = []
 
+# =========================
+# Calculos
+# =========================
+
 for destino in destinos:
 
     row = df_campo[df_campo["Destino"] == destino].iloc[0]
 
     km = row["Km"]
 
-    flete_usd = km * tarifa_usd_km
+    # buscar tarifa según km
+    tarifa_row = tarifas[tarifas["Km"] <= km].iloc[-1]
 
+    flete_usd = tarifa_row["Tarifa"]
+
+    # ecuación económica
     precio_neto = (
         precio
         - flete_usd
@@ -97,6 +87,10 @@ for destino in destinos:
         "Precio Neto": round(precio_neto,2),
         "Gasto Comercial %": round(gasto_comercial*100,2)
     })
+
+# =========================
+# Resultados
+# =========================
 
 if resultados:
 
@@ -121,6 +115,7 @@ if resultados:
         f"Mejor destino: {mejor['Destino']} | Precio Neto: {mejor['Precio Neto']} USD"
     )
 
+    # descarga
     csv = df_res.to_csv(index=False).encode("utf-8-sig")
 
     st.download_button(
