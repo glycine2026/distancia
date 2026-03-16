@@ -1,22 +1,24 @@
 import streamlit as st
 import pandas as pd
 
-st.set_page_config(page_title="Calculadora logística", layout="wide")
+st.set_page_config(layout="wide")
 
-# =============================
+# =========================
 # Cargar Excel
-# =============================
+# =========================
 
 df = pd.read_excel("km_26.xlsx", sheet_name="Hoja1")
 tarifas = pd.read_excel("km_26.xlsx", sheet_name="Hoja2")
 
 df.columns = df.columns.str.strip()
 
-# =============================
-# Inputs económicos
-# =============================
+# =========================
+# Parámetros
+# =========================
 
-st.sidebar.header("Parámetros")
+st.sidebar.header("Parámetros económicos")
+
+tarifa_km = tarifas.iloc[0]["Importe"]
 
 tipo_cambio = st.sidebar.number_input(
     "Tipo de cambio USD",
@@ -43,13 +45,13 @@ comision = st.sidebar.number_input(
     value=1.0
 ) / 100
 
-# =============================
+# =========================
 # Selección campo
-# =============================
+# =========================
 
 st.title("Simulador logístico")
 
-campos = sorted(df["Campo"].dropna().unique())
+campos = sorted(df["Campo"].unique())
 
 campo = st.selectbox(
     "Campo",
@@ -58,11 +60,11 @@ campo = st.selectbox(
 
 df_campo = df[df["Campo"] == campo]
 
-# =============================
-# Selección destino
-# =============================
+# =========================
+# Destino
+# =========================
 
-destinos = sorted(df_campo["Destino"].dropna().unique())
+destinos = sorted(df_campo["Destino"].unique())
 
 destino = st.selectbox(
     "Destino",
@@ -75,43 +77,44 @@ km = row["Km"]
 zona = row["Zona"]
 localidad = row["Localidad"]
 
-# =============================
-# Buscar tarifa
-# =============================
-
-tarifa = tarifas.iloc[0]["Importe"]
-
-# =============================
+# =========================
 # Calcular flete
-# =============================
+# =========================
 
-flete = km * tarifa
+df["flete_calculado"] = df["Km"] * tarifa_km
+
+flete = km * tarifa_km
 flete_usd = flete / tipo_cambio
 
-# =============================
-# Precio neto
-# =============================
+# =========================
+# Precio Neto
+# =========================
 
-precio_neto = precio - flete - paritaria - secada - (comision * precio)
+precio_neto = precio - flete - paritaria - secada - (precio * comision)
 
-# =============================
+# =========================
 # Gasto comercial
-# =============================
+# =========================
 
 gasto_comercial = (precio - precio_neto) / precio
 
-# =============================
+# =========================
 # Promedios
-# =============================
+# =========================
 
-prom_localidad = df[df["Localidad"] == localidad]["Flete promedio"].mean()
-prom_zona = df[df["Zona"] == zona]["Flete promedio"].mean()
+prom_localidad = df[
+    df["Localidad-Destino"] == row["Localidad-Destino"]
+]["flete_calculado"].mean()
 
-# =============================
+prom_zona = df[
+    df["Zona-Destino"] == row["Zona-Destino"]
+]["flete_calculado"].mean()
+
+# =========================
 # Resultados
-# =============================
+# =========================
 
-col1, col2, col3 = st.columns(3)
+col1,col2,col3 = st.columns(3)
 
 col1.metric("Km", round(km,1))
 col2.metric("Flete ($)", round(flete,2))
@@ -119,36 +122,37 @@ col3.metric("Flete USD", round(flete_usd,2))
 
 st.subheader("Resultado económico")
 
-col4, col5 = st.columns(2)
+c1,c2 = st.columns(2)
 
-col4.metric("Precio Neto", round(precio_neto,2))
-col5.metric("Gasto Comercial %", round(gasto_comercial*100,2))
+c1.metric("Precio Neto", round(precio_neto,2))
+c2.metric("Gasto Comercial %", round(gasto_comercial*100,2))
 
-# =============================
-# Promedios
-# =============================
+# =========================
+# Promedios logísticos
+# =========================
 
 st.subheader("Comparación logística")
 
-c1, c2 = st.columns(2)
+p1,p2 = st.columns(2)
 
-c1.metric(
+p1.metric(
     "Promedio localidad",
-    round(prom_localidad,2) if pd.notna(prom_localidad) else "N/A"
+    round(prom_localidad,2)
 )
 
-c2.metric(
+p2.metric(
     "Promedio zona",
-    round(prom_zona,2) if pd.notna(prom_zona) else "N/A"
+    round(prom_zona,2)
 )
 
-# =============================
-# Tabla final tipo Excel
-# =============================
+# =========================
+# Tabla resumen
+# =========================
 
-st.subheader("Resumen")
+st.subheader("Reporte")
 
 resultado = pd.DataFrame({
+
     "Campo":[campo],
     "Destino":[destino],
     "Km":[km],
@@ -158,14 +162,15 @@ resultado = pd.DataFrame({
     "Comisión":[comision],
     "Precio":[precio],
     "Precio Neto":[round(precio_neto,2)],
-    "Gasto Comercial":[round(gasto_comercial*100,2)]
+    "Gasto Comercial %":[round(gasto_comercial*100,2)]
+
 })
 
 st.dataframe(resultado, use_container_width=True)
 
-# =============================
+# =========================
 # Exportar
-# =============================
+# =========================
 
 csv = resultado.to_csv(index=False).encode("utf-8-sig")
 
@@ -174,4 +179,5 @@ st.download_button(
     csv,
     "reporte_logistico.csv",
     "text/csv"
+)
 )
