@@ -10,14 +10,15 @@ st.set_page_config(page_title="Simulador logístico", layout="wide")
 df = pd.read_excel("km_26.xlsx", sheet_name="Hoja1")
 tarifas = pd.read_excel("km_26.xlsx", sheet_name="Hoja2")
 
+# limpiar nombres columnas
 df.columns = df.columns.str.strip()
 tarifas.columns = tarifas.columns.str.strip()
 
 # ordenar tarifas por km
-tarifas = tarifas.sort_values("Km")
+tarifas = tarifas.sort_values("Kilómetros")
 
 # =========================
-# Sidebar parámetros
+# Parámetros económicos
 # =========================
 
 st.sidebar.header("Parámetros económicos")
@@ -55,7 +56,7 @@ destinos = st.multiselect(
 resultados = []
 
 # =========================
-# Calculos
+# Cálculos
 # =========================
 
 for destino in destinos:
@@ -64,12 +65,12 @@ for destino in destinos:
 
     km = row["Km"]
 
-    # buscar tarifa según km
-    tarifa_row = tarifas[tarifas["Km"] <= km].iloc[-1]
+    # buscar tarifa según distancia
+    tarifa_row = tarifas[tarifas["Kilómetros"] <= km].iloc[-1]
 
-    flete_usd = tarifa_row["Tarifa"]
+    flete_usd = tarifa_row["Importe"]
 
-    # ecuación económica
+    # cálculo económico
     precio_neto = (
         precio
         - flete_usd
