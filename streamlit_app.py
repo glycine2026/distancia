@@ -1,98 +1,177 @@
 import streamlit as st
 import pandas as pd
-import requests
-import folium
-from streamlit_folium import st_folium
 
-st.set_page_config(layout="wide")
+st.set_page_config(page_title="Calculadora logística", layout="wide")
 
-st.title("Plataforma logística de destinos")
+# =============================
+# Cargar Excel
+# =============================
 
-# =========================
+df = pd.read_excel("km_26.xlsx", sheet_name="Hoja1")
+tarifas = pd.read_excel("km_26.xlsx", sheet_name="Hoja2")
+
+df.columns = df.columns.str.strip()
+
+# =============================
 # Inputs económicos
-# =========================
+# =============================
 
-st.sidebar.header("Parámetros económicos")
+st.sidebar.header("Parámetros")
 
-tarifa_km = st.sidebar.number_input("Tarifa por km", value=0.15)
-precio = st.sidebar.number_input("Precio", value=200)
+tipo_cambio = st.sidebar.number_input(
+    "Tipo de cambio USD",
+    value=1000.0
+)
 
-paritaria = st.sidebar.number_input("Paritaria", value=3.0)
-secada = st.sidebar.number_input("Secada", value=4.0)
+precio = st.sidebar.number_input(
+    "Precio",
+    value=200.0
+)
 
-comision = st.sidebar.number_input("Comisión (%)", value=1.0) / 100
+paritaria = st.sidebar.number_input(
+    "Paritaria",
+    value=3.0
+)
 
-# =========================
-# Coordenadas
-# =========================
+secada = st.sidebar.number_input(
+    "Secada",
+    value=4.0
+)
 
-st.sidebar.header("Campo")
+comision = st.sidebar.number_input(
+    "Comisión (%)",
+    value=1.0
+) / 100
 
-lat_campo = st.sidebar.number_input("Lat campo", value=-37.0)
-lon_campo = st.sidebar.number_input("Lon campo", value=-59.0)
+# =============================
+# Selección campo
+# =============================
 
-st.sidebar.header("Destino")
+st.title("Simulador logístico")
 
-lat_dest = st.sidebar.number_input("Lat destino", value=-33.0)
-lon_dest = st.sidebar.number_input("Lon destino", value=-60.0)
+campos = sorted(df["Campo"].dropna().unique())
 
-# =========================
-# Calcular ruta
-# =========================
+campo = st.selectbox(
+    "Campo",
+    campos
+)
 
-url = f"http://router.project-osrm.org/route/v1/driving/{lon_campo},{lat_campo};{lon_dest},{lat_dest}?overview=full&geometries=geojson"
+df_campo = df[df["Campo"] == campo]
 
-r = requests.get(url)
+# =============================
+# Selección destino
+# =============================
 
-data = r.json()
+destinos = sorted(df_campo["Destino"].dropna().unique())
 
-distancia_km = data["routes"][0]["distance"] / 1000
+destino = st.selectbox(
+    "Destino",
+    destinos
+)
 
-geometry = data["routes"][0]["geometry"]["coordinates"]
+row = df_campo[df_campo["Destino"] == destino].iloc[0]
 
-# =========================
-# Calculo flete
-# =========================
+km = row["Km"]
+zona = row["Zona"]
+localidad = row["Localidad"]
 
-flete = distancia_km * tarifa_km
+# =============================
+# Buscar tarifa
+# =============================
+
+tarifa = tarifas.iloc[0]["Importe"]
+
+# =============================
+# Calcular flete
+# =============================
+
+flete = km * tarifa
+flete_usd = flete / tipo_cambio
+
+# =============================
+# Precio neto
+# =============================
 
 precio_neto = precio - flete - paritaria - secada - (comision * precio)
 
+# =============================
+# Gasto comercial
+# =============================
+
 gasto_comercial = (precio - precio_neto) / precio
 
-# =========================
-# Mostrar resultados
-# =========================
+# =============================
+# Promedios
+# =============================
+
+prom_localidad = df[df["Localidad"] == localidad]["Flete promedio"].mean()
+prom_zona = df[df["Zona"] == zona]["Flete promedio"].mean()
+
+# =============================
+# Resultados
+# =============================
 
 col1, col2, col3 = st.columns(3)
 
-col1.metric("Distancia (km)", round(distancia_km,1))
-col2.metric("Flete", round(flete,2))
-col3.metric("Precio Neto", round(precio_neto,2))
+col1.metric("Km", round(km,1))
+col2.metric("Flete ($)", round(flete,2))
+col3.metric("Flete USD", round(flete_usd,2))
 
-st.metric("Gasto Comercial (%)", round(gasto_comercial*100,2))
+st.subheader("Resultado económico")
 
-# =========================
-# Mapa
-# =========================
+col4, col5 = st.columns(2)
 
-mapa = folium.Map(location=[lat_campo, lon_campo], zoom_start=6)
+col4.metric("Precio Neto", round(precio_neto,2))
+col5.metric("Gasto Comercial %", round(gasto_comercial*100,2))
 
-folium.Marker(
-    [lat_campo, lon_campo],
-    tooltip="Campo",
-    icon=folium.Icon(color="green")
-).add_to(mapa)
+# =============================
+# Promedios
+# =============================
 
-folium.Marker(
-    [lat_dest, lon_dest],
-    tooltip="Destino",
-    icon=folium.Icon(color="red")
-).add_to(mapa)
+st.subheader("Comparación logística")
 
-# convertir ruta
-route = [[coord[1], coord[0]] for coord in geometry]
+c1, c2 = st.columns(2)
 
-folium.PolyLine(route, color="blue", weight=4).add_to(mapa)
+c1.metric(
+    "Promedio localidad",
+    round(prom_localidad,2) if pd.notna(prom_localidad) else "N/A"
+)
 
-st_folium(mapa, width=900, height=500)
+c2.metric(
+    "Promedio zona",
+    round(prom_zona,2) if pd.notna(prom_zona) else "N/A"
+)
+
+# =============================
+# Tabla final tipo Excel
+# =============================
+
+st.subheader("Resumen")
+
+resultado = pd.DataFrame({
+    "Campo":[campo],
+    "Destino":[destino],
+    "Km":[km],
+    "Flete promedio":[round(flete,2)],
+    "Paritaria":[paritaria],
+    "Secada":[secada],
+    "Comisión":[comision],
+    "Precio":[precio],
+    "Precio Neto":[round(precio_neto,2)],
+    "Gasto Comercial":[round(gasto_comercial*100,2)]
+})
+
+st.dataframe(resultado, use_container_width=True)
+
+# =============================
+# Exportar
+# =============================
+
+csv = resultado.to_csv(index=False).encode("utf-8-sig")
+
+st.download_button(
+    "Descargar reporte",
+    csv,
+    "reporte_logistico.csv",
+    "text/csv"
+)
