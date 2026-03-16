@@ -10,26 +10,75 @@ st.set_page_config(page_title="Simulador logístico", layout="wide")
 df = pd.read_excel("km_26.xlsx", sheet_name="Hoja1")
 tarifas = pd.read_excel("km_26.xlsx", sheet_name="Hoja2")
 
-# limpiar nombres columnas
 df.columns = df.columns.str.strip()
 tarifas.columns = tarifas.columns.str.strip()
 
-# ordenar tarifas por km
-tarifas = tarifas.sort_values("Kilómetros")
+# Normalización de tipos
+df["Km"] = pd.to_numeric(df["Km"], errors="coerce")
+tarifas["Kilómetros"] = pd.to_numeric(tarifas["Kilómetros"], errors="coerce")
+tarifas["Importe"] = pd.to_numeric(tarifas["Importe"], errors="coerce")
+
+df = df.dropna(subset=["Campo", "Destino", "Km"])
+tarifas = tarifas.dropna(subset=["Kilómetros", "Importe"]).sort_values("Kilómetros")
 
 # =========================
-# Parámetros económicos
+# Función para buscar tarifa
+# =========================
+
+def buscar_importe_por_km(km: float, tabla_tarifas: pd.DataFrame) -> float:
+    """
+    Busca el Importe correspondiente a la distancia.
+    Toma la fila con 'Kilómetros' menor o igual al km consultado.
+    Si el km es menor que el mínimo, toma la primera tarifa.
+    """
+    fila = tabla_tarifas[tabla_tarifas["Kilómetros"] <= km]
+
+    if fila.empty:
+        return float(tabla_tarifas.iloc[0]["Importe"])
+
+    return float(fila.iloc[-1]["Importe"])
+
+# =========================
+# Sidebar parámetros
 # =========================
 
 st.sidebar.header("Parámetros económicos")
 
-precio = st.sidebar.number_input("Precio (USD)", value=200.0)
+tipo_cambio = st.sidebar.number_input(
+    "Tipo de cambio (ARS/USD)",
+    min_value=1.0,
+    value=1380.0,
+    step=1.0
+)
 
-paritaria = st.sidebar.number_input("Paritaria (USD)", value=3.0)
+precio = st.sidebar.number_input(
+    "Precio (USD)",
+    min_value=0.0,
+    value=200.0,
+    step=1.0
+)
 
-secada = st.sidebar.number_input("Secada (USD)", value=4.0)
+paritaria = st.sidebar.number_input(
+    "Paritaria (USD)",
+    min_value=0.0,
+    value=3.0,
+    step=0.5
+)
 
-comision = st.sidebar.number_input("Comisión (%)", value=1.0) / 100
+secada = st.sidebar.number_input(
+    "Secada (USD)",
+    min_value=0.0,
+    value=4.0,
+    step=0.5
+)
+
+comision_pct = st.sidebar.number_input(
+    "Comisión (%)",
+    value=1.0,
+    step=0.1
+)
+
+comision = comision_pct / 100
 
 # =========================
 # Selección campo
@@ -37,40 +86,41 @@ comision = st.sidebar.number_input("Comisión (%)", value=1.0) / 100
 
 st.title("Simulador logístico")
 
-campo = st.selectbox(
-    "Campo",
-    sorted(df["Campo"].unique())
-)
+campos = sorted(df["Campo"].dropna().unique().tolist())
 
-df_campo = df[df["Campo"] == campo]
+campo = st.selectbox("Campo", campos)
+
+df_campo = df[df["Campo"] == campo].copy()
 
 # =========================
 # Selección destinos
 # =========================
 
+destinos_disponibles = sorted(df_campo["Destino"].dropna().unique().tolist())
+
 destinos = st.multiselect(
     "Destinos a comparar",
-    sorted(df_campo["Destino"].unique())
+    options=destinos_disponibles
 )
-
-resultados = []
 
 # =========================
 # Cálculos
 # =========================
 
-for destino in destinos:
+resultados = []
 
+for destino in destinos:
     row = df_campo[df_campo["Destino"] == destino].iloc[0]
 
-    km = row["Km"]
+    km = float(row["Km"])
 
-    # buscar tarifa según distancia
-    tarifa_row = tarifas[tarifas["Kilómetros"] <= km].iloc[-1]
+    # Buscar el importe correcto según la distancia
+    importe_ars = buscar_importe_por_km(km, tarifas)
 
-    flete_usd = tarifa_row["Importe"]
+    # Convertir a USD con el tipo de cambio elegido
+    flete_usd = importe_ars / tipo_cambio
 
-    # cálculo económico
+    # Precio neto: Precio - Flete - Paritaria - Secada - (Precio * Comisión)
     precio_neto = (
         precio
         - flete_usd
@@ -79,14 +129,16 @@ for destino in destinos:
         - (precio * comision)
     )
 
-    gasto_comercial = (precio - precio_neto) / precio
+    # Gasto comercial = (Precio - Precio Neto) / Precio
+    gasto_comercial = (precio - precio_neto) / precio if precio != 0 else 0
 
     resultados.append({
         "Destino": destino,
-        "Km": km,
-        "Flete USD": round(flete_usd,2),
-        "Precio Neto": round(precio_neto,2),
-        "Gasto Comercial %": round(gasto_comercial*100,2)
+        "Km": round(km, 1),
+        "Importe ARS": round(importe_ars, 2),
+        "Flete USD": round(flete_usd, 2),
+        "Precio Neto": round(precio_neto, 2),
+        "Gasto Comercial %": round(gasto_comercial * 100, 2)
     })
 
 # =========================
@@ -94,29 +146,26 @@ for destino in destinos:
 # =========================
 
 if resultados:
-
     df_res = pd.DataFrame(resultados)
 
-    # ranking
-    df_res = df_res.sort_values("Precio Neto", ascending=False)
+    # Mejor destino = mayor precio neto
+    df_res = df_res.sort_values("Precio Neto", ascending=False).reset_index(drop=True)
 
-    mejor_precio = df_res.iloc[0]["Precio Neto"]
-
-    df_res["Ahorro vs mejor USD"] = (
-        df_res["Precio Neto"] - mejor_precio
-    )
+    mejor_precio_neto = df_res.loc[0, "Precio Neto"]
+    df_res["Ahorro vs mejor USD"] = (mejor_precio_neto - df_res["Precio Neto"]).round(2)
 
     st.subheader("Comparación de destinos")
 
-    st.dataframe(df_res, use_container_width=True)
+    st.dataframe(df_res, use_container_width=True, hide_index=True)
 
     mejor = df_res.iloc[0]
 
     st.success(
-        f"Mejor destino: {mejor['Destino']} | Precio Neto: {mejor['Precio Neto']} USD"
+        f"Mejor destino: {mejor['Destino']} | "
+        f"Flete: {mejor['Flete USD']} USD | "
+        f"Precio Neto: {mejor['Precio Neto']} USD"
     )
 
-    # descarga
     csv = df_res.to_csv(index=False).encode("utf-8-sig")
 
     st.download_button(
@@ -125,3 +174,5 @@ if resultados:
         "comparacion_destinos.csv",
         "text/csv"
     )
+else:
+    st.info("Seleccioná uno o más destinos para comparar.")
