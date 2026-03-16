@@ -12,38 +12,41 @@ tarifas = pd.read_excel("km_26.xlsx", sheet_name="Hoja2")
 
 df.columns = df.columns.str.strip()
 
+tarifa_pesos_km = tarifas.iloc[0]["Importe"]
+
 # =========================
-# Parámetros
+# Sidebar parámetros
 # =========================
 
-st.sidebar.header("Parámetros económicos")
-
-tarifa_km = tarifas.iloc[0]["Importe"]
+st.sidebar.header("Parámetros")
 
 tipo_cambio = st.sidebar.number_input(
-    "Tipo de cambio USD",
-    value=1000.0
+    "Tipo de cambio",
+    value=1380.0
 )
 
 precio = st.sidebar.number_input(
-    "Precio",
+    "Precio (USD)",
     value=200.0
 )
 
 paritaria = st.sidebar.number_input(
-    "Paritaria",
+    "Paritaria (USD)",
     value=3.0
 )
 
 secada = st.sidebar.number_input(
-    "Secada",
+    "Secada (USD)",
     value=4.0
 )
 
 comision = st.sidebar.number_input(
-    "Comisión (%)",
+    "Comisión %",
     value=1.0
 ) / 100
+
+# tarifa USD/km
+tarifa_usd_km = tarifa_pesos_km / tipo_cambio
 
 # =========================
 # Selección campo
@@ -51,132 +54,78 @@ comision = st.sidebar.number_input(
 
 st.title("Simulador logístico")
 
-campos = sorted(df["Campo"].unique())
-
 campo = st.selectbox(
     "Campo",
-    campos
+    sorted(df["Campo"].unique())
 )
 
 df_campo = df[df["Campo"] == campo]
 
 # =========================
-# Destino
+# MULTI DESTINO
 # =========================
 
-destinos = sorted(df_campo["Destino"].unique())
-
-destino = st.selectbox(
-    "Destino",
-    destinos
+destinos = st.multiselect(
+    "Destinos a comparar",
+    sorted(df_campo["Destino"].unique())
 )
 
-row = df_campo[df_campo["Destino"] == destino].iloc[0]
+resultados = []
 
-km = row["Km"]
-zona = row["Zona"]
-localidad = row["Localidad"]
+for destino in destinos:
 
-# =========================
-# Calcular flete
-# =========================
+    row = df_campo[df_campo["Destino"] == destino].iloc[0]
 
-df["flete_calculado"] = df["Km"] * tarifa_km
+    km = row["Km"]
 
-flete = km * tarifa_km
-flete_usd = flete / tipo_cambio
+    flete_usd = km * tarifa_usd_km
 
-# =========================
-# Precio Neto
-# =========================
+    precio_neto = (
+        precio
+        - flete_usd
+        - paritaria
+        - secada
+        - (precio * comision)
+    )
 
-precio_neto = precio - flete - paritaria - secada - (precio * comision)
+    gasto_comercial = (precio - precio_neto) / precio
 
-# =========================
-# Gasto comercial
-# =========================
+    resultados.append({
+        "Destino": destino,
+        "Km": km,
+        "Flete USD": round(flete_usd,2),
+        "Precio Neto": round(precio_neto,2),
+        "Gasto Comercial %": round(gasto_comercial*100,2)
+    })
 
-gasto_comercial = (precio - precio_neto) / precio
+if resultados:
 
-# =========================
-# Promedios
-# =========================
+    df_res = pd.DataFrame(resultados)
 
-prom_localidad = df[
-    df["Localidad-Destino"] == row["Localidad-Destino"]
-]["flete_calculado"].mean()
+    # ranking
+    df_res = df_res.sort_values("Precio Neto", ascending=False)
 
-prom_zona = df[
-    df["Zona-Destino"] == row["Zona-Destino"]
-]["flete_calculado"].mean()
+    mejor_precio = df_res.iloc[0]["Precio Neto"]
 
-# =========================
-# Resultados
-# =========================
+    df_res["Ahorro vs mejor USD"] = (
+        df_res["Precio Neto"] - mejor_precio
+    )
 
-col1,col2,col3 = st.columns(3)
+    st.subheader("Comparación de destinos")
 
-col1.metric("Km", round(km,1))
-col2.metric("Flete ($)", round(flete,2))
-col3.metric("Flete USD", round(flete_usd,2))
+    st.dataframe(df_res, use_container_width=True)
 
-st.subheader("Resultado económico")
+    mejor = df_res.iloc[0]
 
-c1,c2 = st.columns(2)
+    st.success(
+        f"Mejor destino: {mejor['Destino']} | Precio Neto: {mejor['Precio Neto']} USD"
+    )
 
-c1.metric("Precio Neto", round(precio_neto,2))
-c2.metric("Gasto Comercial %", round(gasto_comercial*100,2))
+    csv = df_res.to_csv(index=False).encode("utf-8-sig")
 
-# =========================
-# Promedios logísticos
-# =========================
-
-st.subheader("Comparación logística")
-
-p1,p2 = st.columns(2)
-
-p1.metric(
-    "Promedio localidad",
-    round(prom_localidad,2)
-)
-
-p2.metric(
-    "Promedio zona",
-    round(prom_zona,2)
-)
-
-# =========================
-# Tabla resumen
-# =========================
-
-st.subheader("Reporte")
-
-resultado = pd.DataFrame({
-
-    "Campo":[campo],
-    "Destino":[destino],
-    "Km":[km],
-    "Flete promedio":[round(flete,2)],
-    "Paritaria":[paritaria],
-    "Secada":[secada],
-    "Comisión":[comision],
-    "Precio":[precio],
-    "Precio Neto":[round(precio_neto,2)],
-    "Gasto Comercial %":[round(gasto_comercial*100,2)]
-
-})
-
-st.dataframe(resultado, use_container_width=True)
-
-# =========================
-# Exportar
-# =========================
-
-csv = resultado.to_csv(index=False).encode("utf-8-sig")
-
-st.download_button(
-    "Descargar reporte",
-    csv,
-    "reporte_logistico.csv",
-    "text/csv"
-)
+    st.download_button(
+        "Descargar comparación",
+        csv,
+        "comparacion_destinos.csv",
+        "text/csv"
+    )
