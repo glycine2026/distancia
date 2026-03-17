@@ -14,7 +14,6 @@ tarifas = pd.read_excel("km_26.xlsx", sheet_name="Hoja2")
 df.columns = df.columns.str.strip()
 tarifas.columns = tarifas.columns.str.strip()
 
-# Normalización de tipos
 df["Km"] = pd.to_numeric(df["Km"], errors="coerce")
 tarifas["Kilómetros"] = pd.to_numeric(tarifas["Kilómetros"], errors="coerce")
 tarifas["Importe"] = pd.to_numeric(tarifas["Importe"], errors="coerce")
@@ -26,37 +25,31 @@ tarifas = tarifas.dropna(subset=["Kilómetros", "Importe"]).sort_values("Kilóme
 # Función tarifas
 # =========================
 
-def buscar_importe_por_km(km: float, tabla_tarifas: pd.DataFrame) -> float:
+def buscar_importe_por_km(km, tabla_tarifas):
     fila = tabla_tarifas[tabla_tarifas["Kilómetros"] <= km]
-
     if fila.empty:
         return float(tabla_tarifas.iloc[0]["Importe"])
-
     return float(fila.iloc[-1]["Importe"])
 
 # =========================
-# Función OSRM (distancia real)
+# Función OSRM
 # =========================
 
 def distancia_osrm(lat1, lon1, lat2, lon2):
     try:
         url = f"http://router.project-osrm.org/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=false"
-
         response = requests.get(url, timeout=10)
         data = response.json()
 
         if "routes" in data and len(data["routes"]) > 0:
-            distancia_m = data["routes"][0]["distance"]
-            return distancia_m / 1000  # ✅ KM
-
+            return data["routes"][0]["distance"] / 1000  # KM
         else:
             return None
-
     except:
         return None
 
 # =========================
-# Sidebar parámetros
+# Sidebar
 # =========================
 
 st.sidebar.header("Parámetros económicos")
@@ -81,11 +74,23 @@ campo = st.selectbox("Campo", campos)
 df_campo = df[df["Campo"] == campo].copy()
 
 # =========================
-# DESTINO MANUAL (OSRM)
+# DESTINOS BASE
+# =========================
+
+destinos_excel = sorted(df_campo["Destino"].unique())
+
+# =========================
+# BLOQUE UX (IMPORTANTE)
 # =========================
 
 st.markdown("---")
-st.subheader("➕ Agregar destino manual")
+st.info("👉 Si el destino ya aparece en la lista, NO completar nada abajo")
+
+# =========================
+# DESTINO MANUAL
+# =========================
+
+st.subheader("➕ Agregar destino nuevo")
 
 col1, col2 = st.columns(2)
 
@@ -97,17 +102,21 @@ with col2:
     lat_dest = st.number_input("Lat destino", value=-34.0, format="%.6f")
     lon_dest = st.number_input("Lon destino", value=-58.0, format="%.6f")
 
-nombre_destino = st.text_input("Nombre del destino nuevo")
+nombre_destino = st.text_input("Nombre del destino")
 
-if st.button("Calcular distancia y agregar"):
+if st.button("Agregar destino"):
 
-    if nombre_destino == "":
-        st.warning("Ingresá un nombre para el destino")
+    if nombre_destino.strip() == "":
+        st.warning("⚠️ Ingresá un nombre para el destino")
+
+    elif nombre_destino in destinos_excel:
+        st.warning("⚠️ Ese destino ya existe, seleccionarlo de la lista")
+
     else:
         km_manual = distancia_osrm(lat_campo, lon_campo, lat_dest, lon_dest)
 
         if km_manual:
-            st.success(f"Distancia por ruta: {round(km_manual,1)} km")
+            st.success(f"Distancia calculada: {round(km_manual,1)} km")
 
             if "destinos_manuales" not in st.session_state:
                 st.session_state.destinos_manuales = []
@@ -116,14 +125,13 @@ if st.button("Calcular distancia y agregar"):
                 "Destino": nombre_destino,
                 "Km": km_manual
             })
+
         else:
             st.error("No se pudo calcular la distancia")
 
 # =========================
-# Selección destinos
+# UNIFICAR DESTINOS
 # =========================
-
-destinos_excel = sorted(df_campo["Destino"].unique())
 
 destinos_manual = []
 if "destinos_manuales" in st.session_state:
@@ -135,14 +143,13 @@ destinos = st.multiselect(
 )
 
 # =========================
-# Cálculos
+# CÁLCULOS
 # =========================
 
 resultados = []
 
 for destino in destinos:
 
-    # KM desde Excel o manual
     if destino in df_campo["Destino"].values:
         km = float(df_campo[df_campo["Destino"] == destino].iloc[0]["Km"])
     else:
@@ -152,13 +159,9 @@ for destino in destinos:
             if d["Destino"] == destino
         )
 
-    # tarifa por tramo
     importe_ars = buscar_importe_por_km(km, tarifas)
-
-    # flete USD
     flete_usd = importe_ars / tipo_cambio
 
-    # precio neto
     precio_neto = (
         precio
         - flete_usd
@@ -172,20 +175,18 @@ for destino in destinos:
     resultados.append({
         "Destino": destino,
         "Km": round(km, 1),
-        "Importe ARS": round(importe_ars, 2),
         "Flete USD": round(flete_usd, 2),
         "Precio Neto": round(precio_neto, 2),
         "Gasto Comercial %": round(gasto_comercial * 100, 2)
     })
 
 # =========================
-# Resultados
+# RESULTADOS
 # =========================
 
 if resultados:
 
     df_res = pd.DataFrame(resultados)
-
     df_res = df_res.sort_values("Precio Neto", ascending=False).reset_index(drop=True)
 
     mejor = df_res.iloc[0]["Precio Neto"]
@@ -203,14 +204,5 @@ if resultados:
         f"Precio Neto: {best['Precio Neto']} USD"
     )
 
-    csv = df_res.to_csv(index=False).encode("utf-8-sig")
-
-    st.download_button(
-        "Descargar comparación",
-        csv,
-        "comparacion_destinos.csv",
-        "text/csv"
-    )
-
 else:
-    st.info("Seleccioná uno o más destinos para comparar.")
+    st.info("Seleccioná destinos para comparar")
