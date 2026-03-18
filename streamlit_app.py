@@ -14,7 +14,6 @@ tarifas = pd.read_excel("km_26.xlsx", sheet_name="Hoja2")
 df.columns = df.columns.str.strip()
 tarifas.columns = tarifas.columns.str.strip()
 
-# Tipos numéricos
 df["Km"] = pd.to_numeric(df["Km"], errors="coerce")
 df["Lat"] = pd.to_numeric(df["Lat"], errors="coerce")
 df["Lon"] = pd.to_numeric(df["Lon"], errors="coerce")
@@ -53,18 +52,20 @@ def distancia_osrm(lat1, lon1, lat2, lon2):
         return None
 
 # =========================
-# Sidebar
+# Sidebar global
 # =========================
 
-st.sidebar.header("Parámetros económicos")
+st.sidebar.header("Parámetros base")
 
 tipo_cambio = st.sidebar.number_input("Tipo de cambio (ARS/USD)", value=1380.0)
 precio = st.sidebar.number_input("Precio (USD)", value=200.0)
-paritaria = st.sidebar.number_input("Paritaria (USD)", value=3.0)
-secada = st.sidebar.number_input("Secada (USD)", value=4.0)
-comision_pct = st.sidebar.number_input("Comisión (%)", value=1.0)
 
-comision = comision_pct / 100
+# Valores por defecto (para inicializar destinos)
+paritaria_base = st.sidebar.number_input("Paritaria base", value=3.0)
+secada_base = st.sidebar.number_input("Secada base", value=4.0)
+comision_base_pct = st.sidebar.number_input("Comisión base (%)", value=1.0)
+
+comision_base = comision_base_pct / 100
 
 # =========================
 # Selección campo
@@ -77,32 +78,27 @@ campo = st.selectbox("Campo", campos)
 
 df_campo = df[df["Campo"] == campo].copy()
 
-# 👉 Obtener lat/lon del campo automáticamente
+# Coordenadas automáticas
 fila_campo = df_campo.iloc[0]
-
 lat_campo = fila_campo["Lat"]
 lon_campo = fila_campo["Lon"]
 
 if pd.isna(lat_campo) or pd.isna(lon_campo):
-    st.error("⚠️ Este campo no tiene coordenadas cargadas en el Excel")
+    st.error("⚠️ Este campo no tiene coordenadas")
 else:
-    st.caption(f"📍 Ubicación campo: {round(lat_campo,4)}, {round(lon_campo,4)}")
+    st.caption(f"📍 Campo: {round(lat_campo,4)}, {round(lon_campo,4)}")
 
 # =========================
-# DESTINOS BASE
+# Destinos base
 # =========================
 
 destinos_excel = sorted(df_campo["Destino"].unique())
 
-# =========================
-# BLOQUE UX
-# =========================
-
 st.markdown("---")
-st.info("👉 Si el destino ya aparece en la lista, NO completar nada abajo")
+st.info("👉 Si el destino ya está en la lista, NO cargar manual")
 
 # =========================
-# DESTINO MANUAL
+# Destino manual
 # =========================
 
 st.subheader("➕ Agregar destino nuevo")
@@ -120,19 +116,16 @@ nombre_destino = st.text_input("Nombre del destino")
 if st.button("Agregar destino"):
 
     if nombre_destino.strip() == "":
-        st.warning("⚠️ Ingresá un nombre para el destino")
+        st.warning("Ingresá un nombre")
 
     elif nombre_destino in destinos_excel:
-        st.warning("⚠️ Ese destino ya existe, seleccionarlo de la lista")
-
-    elif pd.isna(lat_campo) or pd.isna(lon_campo):
-        st.error("El campo no tiene coordenadas")
+        st.warning("Ese destino ya existe")
 
     else:
         km_manual = distancia_osrm(lat_campo, lon_campo, lat_dest, lon_dest)
 
         if km_manual:
-            st.success(f"Distancia calculada: {round(km_manual,1)} km")
+            st.success(f"{round(km_manual,1)} km")
 
             if "destinos_manuales" not in st.session_state:
                 st.session_state.destinos_manuales = []
@@ -143,10 +136,10 @@ if st.button("Agregar destino"):
             })
 
         else:
-            st.error("No se pudo calcular la distancia")
+            st.error("Error calculando distancia")
 
 # =========================
-# UNIFICAR DESTINOS
+# Unificar destinos
 # =========================
 
 destinos_manual = []
@@ -157,6 +150,57 @@ destinos = st.multiselect(
     "Destinos a comparar",
     options=destinos_excel + destinos_manual
 )
+
+# =========================
+# PARAMETROS POR DESTINO
+# =========================
+
+if "param_destinos" not in st.session_state:
+    st.session_state.param_destinos = {}
+
+st.markdown("### ⚙️ Configuración por destino")
+
+for destino in destinos:
+
+    if destino not in st.session_state.param_destinos:
+        st.session_state.param_destinos[destino] = {
+            "paritaria": paritaria_base,
+            "secada": secada_base,
+            "comision": comision_base,
+            "contraflete": 0.0
+        }
+
+    with st.expander(f"{destino}", expanded=False):
+
+        c1, c2 = st.columns(2)
+
+        with c1:
+            st.session_state.param_destinos[destino]["paritaria"] = st.number_input(
+                f"Paritaria",
+                value=float(st.session_state.param_destinos[destino]["paritaria"]),
+                key=f"paritaria_{destino}"
+            )
+
+            st.session_state.param_destinos[destino]["secada"] = st.number_input(
+                f"Secada",
+                value=float(st.session_state.param_destinos[destino]["secada"]),
+                key=f"secada_{destino}"
+            )
+
+        with c2:
+            comision_pct_dest = st.number_input(
+                f"Comisión %",
+                value=float(st.session_state.param_destinos[destino]["comision"] * 100),
+                key=f"comision_{destino}"
+            )
+
+            st.session_state.param_destinos[destino]["comision"] = comision_pct_dest / 100
+
+            st.session_state.param_destinos[destino]["contraflete"] = st.number_input(
+                f"Contraflete USD",
+                value=float(st.session_state.param_destinos[destino]["contraflete"]),
+                key=f"contra_{destino}"
+            )
 
 # =========================
 # CÁLCULOS
@@ -178,12 +222,15 @@ for destino in destinos:
     importe_ars = buscar_importe_por_km(km, tarifas)
     flete_usd = importe_ars / tipo_cambio
 
+    params = st.session_state.param_destinos[destino]
+
     precio_neto = (
         precio
         - flete_usd
-        - paritaria
-        - secada
-        - (precio * comision)
+        - params["paritaria"]
+        - params["secada"]
+        - params["contraflete"]
+        - (precio * params["comision"])
     )
 
     gasto_comercial = (precio - precio_neto) / precio if precio != 0 else 0
@@ -216,9 +263,8 @@ if resultados:
 
     st.success(
         f"Mejor destino: {best['Destino']} | "
-        f"Flete: {best['Flete USD']} USD | "
         f"Precio Neto: {best['Precio Neto']} USD"
     )
 
 else:
-    st.info("Seleccioná destinos para comparar")
+    st.info("Seleccioná destinos")
