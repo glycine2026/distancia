@@ -14,7 +14,11 @@ tarifas = pd.read_excel("km_26.xlsx", sheet_name="Hoja2")
 df.columns = df.columns.str.strip()
 tarifas.columns = tarifas.columns.str.strip()
 
+# Tipos numéricos
 df["Km"] = pd.to_numeric(df["Km"], errors="coerce")
+df["Lat"] = pd.to_numeric(df["Lat"], errors="coerce")
+df["Lon"] = pd.to_numeric(df["Lon"], errors="coerce")
+
 tarifas["Kilómetros"] = pd.to_numeric(tarifas["Kilómetros"], errors="coerce")
 tarifas["Importe"] = pd.to_numeric(tarifas["Importe"], errors="coerce")
 
@@ -42,7 +46,7 @@ def distancia_osrm(lat1, lon1, lat2, lon2):
         data = response.json()
 
         if "routes" in data and len(data["routes"]) > 0:
-            return data["routes"][0]["distance"] / 1000  # KM
+            return data["routes"][0]["distance"] / 1000
         else:
             return None
     except:
@@ -73,6 +77,17 @@ campo = st.selectbox("Campo", campos)
 
 df_campo = df[df["Campo"] == campo].copy()
 
+# 👉 Obtener lat/lon del campo automáticamente
+fila_campo = df_campo.iloc[0]
+
+lat_campo = fila_campo["Lat"]
+lon_campo = fila_campo["Lon"]
+
+if pd.isna(lat_campo) or pd.isna(lon_campo):
+    st.error("⚠️ Este campo no tiene coordenadas cargadas en el Excel")
+else:
+    st.caption(f"📍 Ubicación campo: {round(lat_campo,4)}, {round(lon_campo,4)}")
+
 # =========================
 # DESTINOS BASE
 # =========================
@@ -80,7 +95,7 @@ df_campo = df[df["Campo"] == campo].copy()
 destinos_excel = sorted(df_campo["Destino"].unique())
 
 # =========================
-# BLOQUE UX (IMPORTANTE)
+# BLOQUE UX
 # =========================
 
 st.markdown("---")
@@ -95,11 +110,9 @@ st.subheader("➕ Agregar destino nuevo")
 col1, col2 = st.columns(2)
 
 with col1:
-    lat_campo = st.number_input("Lat campo", value=-35.0, format="%.6f")
-    lon_campo = st.number_input("Lon campo", value=-60.0, format="%.6f")
+    lat_dest = st.number_input("Lat destino", value=-34.0, format="%.6f")
 
 with col2:
-    lat_dest = st.number_input("Lat destino", value=-34.0, format="%.6f")
     lon_dest = st.number_input("Lon destino", value=-58.0, format="%.6f")
 
 nombre_destino = st.text_input("Nombre del destino")
@@ -111,6 +124,9 @@ if st.button("Agregar destino"):
 
     elif nombre_destino in destinos_excel:
         st.warning("⚠️ Ese destino ya existe, seleccionarlo de la lista")
+
+    elif pd.isna(lat_campo) or pd.isna(lon_campo):
+        st.error("El campo no tiene coordenadas")
 
     else:
         km_manual = distancia_osrm(lat_campo, lon_campo, lat_dest, lon_dest)
