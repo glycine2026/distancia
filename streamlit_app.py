@@ -22,16 +22,19 @@ tarifas["Kilómetros"] = pd.to_numeric(tarifas["Kilómetros"], errors="coerce")
 tarifas["Importe"] = pd.to_numeric(tarifas["Importe"], errors="coerce")
 
 df = df.dropna(subset=["Campo", "Destino", "Km"])
-tarifas = tarifas.dropna(subset=["Kilómetros", "Importe"]).sort_values("Kilómetros")
+tarifas = tarifas.dropna(subset=["CATAC", "Kilómetros", "Importe"])
 
 # =========================
 # Función tarifas
 # =========================
 
 def buscar_importe_por_km(km, tabla_tarifas):
+    tabla_tarifas = tabla_tarifas.sort_values("Kilómetros")
     fila = tabla_tarifas[tabla_tarifas["Kilómetros"] <= km]
+
     if fila.empty:
         return float(tabla_tarifas.iloc[0]["Importe"])
+
     return float(fila.iloc[-1]["Importe"])
 
 # =========================
@@ -46,21 +49,39 @@ def distancia_osrm(lat1, lon1, lat2, lon2):
 
         if "routes" in data and len(data["routes"]) > 0:
             return data["routes"][0]["distance"] / 1000
-        else:
-            return None
+        return None
     except:
         return None
 
 # =========================
-# Sidebar global
+# Sidebar
 # =========================
 
-st.sidebar.header("Parámetros base")
+st.sidebar.header("Parámetros económicos")
 
 tipo_cambio = st.sidebar.number_input("Tipo de cambio (ARS/USD)", value=1380.0)
 precio = st.sidebar.number_input("Precio (USD)", value=200.0)
 
-# Valores por defecto (para inicializar destinos)
+# CATAC
+catac = st.sidebar.selectbox(
+    "Escala CATAC",
+    options=sorted(tarifas["CATAC"].unique())
+)
+
+tipo_catac = st.sidebar.radio(
+    "Tipo de tarifa",
+    ["CATAC llena", "CATAC con descuento"]
+)
+
+# Descuento dinámico
+if tipo_catac == "CATAC con descuento":
+    descuento_pct = st.sidebar.number_input("Descuento (%)", value=8.0)
+else:
+    descuento_pct = 0.0
+
+st.sidebar.caption(f"CATAC seleccionada: {catac}")
+
+# Valores base
 paritaria_base = st.sidebar.number_input("Paritaria base", value=3.0)
 secada_base = st.sidebar.number_input("Secada base", value=4.0)
 comision_base_pct = st.sidebar.number_input("Comisión base (%)", value=1.0)
@@ -73,23 +94,20 @@ comision_base = comision_base_pct / 100
 
 st.title("Simulador logístico")
 
-campos = sorted(df["Campo"].dropna().unique())
-campo = st.selectbox("Campo", campos)
+campo = st.selectbox("Campo", sorted(df["Campo"].unique()))
+df_campo = df[df["Campo"] == campo]
 
-df_campo = df[df["Campo"] == campo].copy()
-
-# Coordenadas automáticas
 fila_campo = df_campo.iloc[0]
 lat_campo = fila_campo["Lat"]
 lon_campo = fila_campo["Lon"]
 
 if pd.isna(lat_campo) or pd.isna(lon_campo):
-    st.error("⚠️ Este campo no tiene coordenadas")
+    st.error("⚠️ Campo sin coordenadas")
 else:
     st.caption(f"📍 Campo: {round(lat_campo,4)}, {round(lon_campo,4)}")
 
 # =========================
-# Destinos base
+# Destinos
 # =========================
 
 destinos_excel = sorted(df_campo["Destino"].unique())
@@ -103,13 +121,8 @@ st.info("👉 Si el destino ya está en la lista, NO cargar manual")
 
 st.subheader("➕ Agregar destino nuevo")
 
-col1, col2 = st.columns(2)
-
-with col1:
-    lat_dest = st.number_input("Lat destino", value=-34.0, format="%.6f")
-
-with col2:
-    lon_dest = st.number_input("Lon destino", value=-58.0, format="%.6f")
+lat_dest = st.number_input("Lat destino", value=-34.0, format="%.6f")
+lon_dest = st.number_input("Lon destino", value=-58.0, format="%.6f")
 
 nombre_destino = st.text_input("Nombre del destino")
 
@@ -125,8 +138,6 @@ if st.button("Agregar destino"):
         km_manual = distancia_osrm(lat_campo, lon_campo, lat_dest, lon_dest)
 
         if km_manual:
-            st.success(f"{round(km_manual,1)} km")
-
             if "destinos_manuales" not in st.session_state:
                 st.session_state.destinos_manuales = []
 
@@ -135,6 +146,7 @@ if st.button("Agregar destino"):
                 "Km": km_manual
             })
 
+            st.success(f"{round(km_manual,1)} km")
         else:
             st.error("Error calculando distancia")
 
@@ -142,9 +154,7 @@ if st.button("Agregar destino"):
 # Unificar destinos
 # =========================
 
-destinos_manual = []
-if "destinos_manuales" in st.session_state:
-    destinos_manual = [d["Destino"] for d in st.session_state.destinos_manuales]
+destinos_manual = [d["Destino"] for d in st.session_state.get("destinos_manuales", [])]
 
 destinos = st.multiselect(
     "Destinos a comparar",
@@ -152,7 +162,7 @@ destinos = st.multiselect(
 )
 
 # =========================
-# PARAMETROS POR DESTINO
+# Parámetros por destino
 # =========================
 
 if "param_destinos" not in st.session_state:
@@ -170,41 +180,23 @@ for destino in destinos:
             "contraflete": 0.0
         }
 
-    with st.expander(f"{destino}", expanded=False):
+    with st.expander(destino):
 
-        c1, c2 = st.columns(2)
+        p = st.session_state.param_destinos[destino]
 
-        with c1:
-            st.session_state.param_destinos[destino]["paritaria"] = st.number_input(
-                f"Paritaria",
-                value=float(st.session_state.param_destinos[destino]["paritaria"]),
-                key=f"paritaria_{destino}"
-            )
+        p["paritaria"] = st.number_input(f"Paritaria", value=p["paritaria"], key=f"p_{destino}")
+        p["secada"] = st.number_input(f"Secada", value=p["secada"], key=f"s_{destino}")
 
-            st.session_state.param_destinos[destino]["secada"] = st.number_input(
-                f"Secada",
-                value=float(st.session_state.param_destinos[destino]["secada"]),
-                key=f"secada_{destino}"
-            )
+        com_pct = st.number_input(f"Comisión %", value=p["comision"]*100, key=f"c_{destino}")
+        p["comision"] = com_pct / 100
 
-        with c2:
-            comision_pct_dest = st.number_input(
-                f"Comisión %",
-                value=float(st.session_state.param_destinos[destino]["comision"] * 100),
-                key=f"comision_{destino}"
-            )
-
-            st.session_state.param_destinos[destino]["comision"] = comision_pct_dest / 100
-
-            st.session_state.param_destinos[destino]["contraflete"] = st.number_input(
-                f"Contraflete USD",
-                value=float(st.session_state.param_destinos[destino]["contraflete"]),
-                key=f"contra_{destino}"
-            )
+        p["contraflete"] = st.number_input(f"Contraflete USD", value=p["contraflete"], key=f"cf_{destino}")
 
 # =========================
-# CÁLCULOS
+# Cálculos
 # =========================
+
+tarifas_filtradas = tarifas[tarifas["CATAC"] == catac]
 
 resultados = []
 
@@ -213,38 +205,36 @@ for destino in destinos:
     if destino in df_campo["Destino"].values:
         km = float(df_campo[df_campo["Destino"] == destino].iloc[0]["Km"])
     else:
-        km = next(
-            d["Km"]
-            for d in st.session_state["destinos_manuales"]
-            if d["Destino"] == destino
-        )
+        km = next(d["Km"] for d in st.session_state["destinos_manuales"] if d["Destino"] == destino)
 
-    importe_ars = buscar_importe_por_km(km, tarifas)
+    importe_ars = buscar_importe_por_km(km, tarifas_filtradas)
+
+    # aplicar descuento variable
+    if tipo_catac == "CATAC con descuento":
+        importe_ars *= (1 - descuento_pct / 100)
+
     flete_usd = importe_ars / tipo_cambio
 
-    params = st.session_state.param_destinos[destino]
+    p = st.session_state.param_destinos[destino]
 
     precio_neto = (
         precio
         - flete_usd
-        - params["paritaria"]
-        - params["secada"]
-        - params["contraflete"]
-        - (precio * params["comision"])
+        - p["paritaria"]
+        - p["secada"]
+        - p["contraflete"]
+        - (precio * p["comision"])
     )
-
-    gasto_comercial = (precio - precio_neto) / precio if precio != 0 else 0
 
     resultados.append({
         "Destino": destino,
-        "Km": round(km, 1),
-        "Flete USD": round(flete_usd, 2),
-        "Precio Neto": round(precio_neto, 2),
-        "Gasto Comercial %": round(gasto_comercial * 100, 2)
+        "Km": round(km,1),
+        "Flete USD": round(flete_usd,2),
+        "Precio Neto": round(precio_neto,2)
     })
 
 # =========================
-# RESULTADOS
+# Resultados
 # =========================
 
 if resultados:
@@ -256,15 +246,9 @@ if resultados:
     df_res["Ahorro vs mejor USD"] = (mejor - df_res["Precio Neto"]).round(2)
 
     st.subheader("Comparación de destinos")
-
     st.dataframe(df_res, use_container_width=True, hide_index=True)
 
-    best = df_res.iloc[0]
-
-    st.success(
-        f"Mejor destino: {best['Destino']} | "
-        f"Precio Neto: {best['Precio Neto']} USD"
-    )
+    st.success(f"Mejor destino: {df_res.iloc[0]['Destino']}")
 
 else:
     st.info("Seleccioná destinos")
