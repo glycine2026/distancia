@@ -200,10 +200,7 @@ if agregar_destino:
             })
             st.success(f"Destino agregado: {round(km_manual, 1)} km")
         else:
-            st.error(
-                "No se pudo calcular la distancia con el servidor de rutas. "
-                "Probá de nuevo en unos segundos."
-            )
+            st.error("No se pudo calcular la distancia")
 
 
 # =========================
@@ -234,30 +231,13 @@ for destino in destinos:
     with st.expander(destino):
         p = st.session_state.param_destinos[destino]
 
-        p["paritaria"] = st.number_input(
-            "Paritaria",
-            value=float(p["paritaria"]),
-            key=f"p_{destino}"
-        )
+        p["paritaria"] = st.number_input("Paritaria", value=p["paritaria"], key=f"p_{destino}")
+        p["secada"] = st.number_input("Secada", value=p["secada"], key=f"s_{destino}")
 
-        p["secada"] = st.number_input(
-            "Secada",
-            value=float(p["secada"]),
-            key=f"s_{destino}"
-        )
-
-        com_pct = st.number_input(
-            "Comisión %",
-            value=float(p["comision"]) * 100,
-            key=f"c_{destino}"
-        )
+        com_pct = st.number_input("Comisión %", value=p["comision"]*100, key=f"c_{destino}")
         p["comision"] = com_pct / 100
 
-        p["contraflete"] = st.number_input(
-            "Contraflete USD",
-            value=float(p["contraflete"]),
-            key=f"cf_{destino}"
-        )
+        p["contraflete"] = st.number_input("Contraflete USD", value=p["contraflete"], key=f"cf_{destino}")
 
 
 # =========================
@@ -272,52 +252,53 @@ if calcular:
     else:
         tarifas_filtradas = tarifas[tarifas["CATAC"] == catac]
 
-        if tarifas_filtradas.empty:
-            st.error("No hay tarifas para la escala CATAC seleccionada.")
-        else:
-            resultados = []
+        resultados = []
 
-            for destino in destinos:
-                if destino in df_campo["Destino"].values:
-                    km = float(df_campo[df_campo["Destino"] == destino].iloc[0]["Km"])
-                else:
-                    km = next(
-                        d["Km"]
-                        for d in st.session_state.destinos_manuales
-                        if d["Destino"] == destino
-                    )
+        for destino in destinos:
 
-                importe_ars = buscar_importe_por_km(km, tarifas_filtradas)
+            if destino in df_campo["Destino"].values:
+                km = float(df_campo[df_campo["Destino"] == destino].iloc[0]["Km"])
+            else:
+                km = next(d["Km"] for d in st.session_state.destinos_manuales if d["Destino"] == destino)
 
-                if tipo_catac == "CATAC con descuento":
-                    importe_ars *= (1 - descuento_pct / 100)
+            importe_ars = buscar_importe_por_km(km, tarifas_filtradas)
 
-                flete_usd = importe_ars / tipo_cambio
-                p = st.session_state.param_destinos[destino]
+            if tipo_catac == "CATAC con descuento":
+                importe_ars *= (1 - descuento_pct / 100)
 
-                precio_neto = (
-                    precio
-                    - flete_usd
-                    - p["paritaria"]
-                    - p["secada"]
-                    - p["contraflete"]
-                    - (precio * p["comision"])
-                )
+            flete_usd = importe_ars / tipo_cambio
+            p = st.session_state.param_destinos[destino]
 
-                resultados.append({
-                    "Destino": destino,
-                    "Km": round(km, 1),
-                    "Flete USD": round(flete_usd, 2),
-                    "Precio Neto": round(precio_neto, 2)
-                })
+            precio_neto = (
+                precio
+                - flete_usd
+                - p["paritaria"]
+                - p["secada"]
+                - p["contraflete"]
+                - (precio * p["comision"])
+            )
 
-            df_res = pd.DataFrame(resultados)
-            df_res = df_res.sort_values("Precio Neto", ascending=False).reset_index(drop=True)
+            # ✅ GASTO COMERCIAL
+            if precio != 0:
+                gasto_comercial = (precio - precio_neto) / precio
+            else:
+                gasto_comercial = 0
 
-            mejor = df_res.iloc[0]["Precio Neto"]
-            df_res["Ahorro vs mejor USD"] = (mejor - df_res["Precio Neto"]).round(2)
+            resultados.append({
+                "Destino": destino,
+                "Km": round(km, 1),
+                "Flete USD": round(flete_usd, 2),
+                "Precio Neto": round(precio_neto, 2),
+                "Gasto Comercial %": round(gasto_comercial * 100, 2)
+            })
 
-            st.session_state.resultados = df_res
+        df_res = pd.DataFrame(resultados)
+        df_res = df_res.sort_values("Precio Neto", ascending=False).reset_index(drop=True)
+
+        mejor = df_res.iloc[0]["Precio Neto"]
+        df_res["Ahorro vs mejor USD"] = (mejor - df_res["Precio Neto"]).round(2)
+
+        st.session_state.resultados = df_res
 
 
 # =========================
