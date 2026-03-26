@@ -6,7 +6,7 @@ import requests
 st.set_page_config(page_title="Simulador logístico", layout="wide")
 
 # =========================
-# Carga de datos cacheada
+# Cargar Excel (cacheado)
 # =========================
 @st.cache_data
 def cargar_datos():
@@ -29,20 +29,6 @@ def cargar_datos():
     return df, tarifas
 
 
-df, tarifas = cargar_datos()
-
-# =========================
-# Estado inicial
-# =========================
-if "destinos_manuales" not in st.session_state:
-    st.session_state.destinos_manuales = []
-
-if "param_destinos" not in st.session_state:
-    st.session_state.param_destinos = {}
-
-if "ultimo_llamado_osrm" not in st.session_state:
-    st.session_state.ultimo_llamado_osrm = 0.0
-
 # =========================
 # Función tarifas
 # =========================
@@ -55,36 +41,65 @@ def buscar_importe_por_km(km, tabla_tarifas):
 
     return float(fila.iloc[-1]["Importe"])
 
-# =========================
-# Rate limit simple
-# =========================
-def esperar_si_hace_falta(min_intervalo_segundos=1.0):
-    ahora = time.time()
-    transcurrido = ahora - st.session_state.ultimo_llamado_osrm
-
-    if transcurrido < min_intervalo_segundos:
-        time.sleep(min_intervalo_segundos - transcurrido)
-
-    st.session_state.ultimo_llamado_osrm = time.time()
 
 # =========================
-# Distancia OSRM cacheada
+# Función OSRM robusta
 # =========================
 @st.cache_data(ttl=86400, show_spinner=False)
 def distancia_osrm(lat1, lon1, lat2, lon2):
     url = (
-        f"http://router.project-osrm.org/route/v1/driving/"
+        f"https://router.project-osrm.org/route/v1/driving/"
         f"{lon1},{lat1};{lon2},{lat2}?overview=false"
     )
 
-    response = requests.get(url, timeout=10)
-    response.raise_for_status()
-    data = response.json()
+    for intento in range(3):
+        try:
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            data = response.json()
 
-    if "routes" in data and len(data["routes"]) > 0:
-        return data["routes"][0]["distance"] / 1000
+            if "routes" in data and len(data["routes"]) > 0:
+                return data["routes"][0]["distance"] / 1000
+
+            return None
+
+        except requests.exceptions.Timeout:
+            if intento < 2:
+                time.sleep(2)
+            else:
+                return None
+
+        except requests.exceptions.RequestException:
+            return None
+
+        except Exception:
+            return None
 
     return None
+
+
+# =========================
+# Carga inicial
+# =========================
+try:
+    df, tarifas = cargar_datos()
+except Exception as e:
+    st.error(f"Error cargando el archivo Excel: {e}")
+    st.stop()
+
+
+# =========================
+# Estado
+# =========================
+if "destinos_manuales" not in st.session_state:
+    st.session_state.destinos_manuales = []
+
+if "param_destinos" not in st.session_state:
+    st.session_state.param_destinos = {}
+
+if "resultados" not in st.session_state:
+    st.session_state.resultados = None
+
 
 # =========================
 # Sidebar
@@ -96,7 +111,7 @@ precio = st.sidebar.number_input("Precio (USD)", value=200.0)
 
 catac = st.sidebar.selectbox(
     "Escala CATAC",
-    options=sorted(tarifas["CATAC"].unique())
+    options=sorted(tarifas["CATAC"].dropna().unique())
 )
 
 tipo_catac = st.sidebar.radio(
@@ -114,15 +129,23 @@ st.sidebar.caption(f"CATAC seleccionada: {catac}")
 paritaria_base = st.sidebar.number_input("Paritaria base", value=3.0)
 secada_base = st.sidebar.number_input("Secada base", value=4.0)
 comision_base_pct = st.sidebar.number_input("Comisión base (%)", value=1.0)
+
 comision_base = comision_base_pct / 100
+
 
 # =========================
 # Selección campo
 # =========================
 st.title("Simulador logístico")
 
-campo = st.selectbox("Campo", sorted(df["Campo"].unique()))
+campos_disponibles = sorted(df["Campo"].dropna().unique())
+campo = st.selectbox("Campo", campos_disponibles)
+
 df_campo = df[df["Campo"] == campo]
+
+if df_campo.empty:
+    st.error("No se encontraron datos para el campo seleccionado.")
+    st.stop()
 
 fila_campo = df_campo.iloc[0]
 lat_campo = fila_campo["Lat"]
@@ -134,13 +157,17 @@ if pd.isna(lat_campo) or pd.isna(lon_campo):
 else:
     st.caption(f"📍 Campo: {round(lat_campo, 4)}, {round(lon_campo, 4)}")
 
-destinos_excel = sorted(df_campo["Destino"].unique())
-
-st.markdown("---")
-st.info("👉 Si el destino ya está en la lista, no cargar manualmente")
 
 # =========================
-# Alta de destino manual con form
+# Destinos
+# =========================
+destinos_excel = sorted(df_campo["Destino"].dropna().unique())
+
+st.markdown("---")
+st.info("👉 Si el destino ya está en la lista, NO cargar manual")
+
+# =========================
+# Destino manual con form
 # =========================
 st.subheader("➕ Agregar destino nuevo")
 
@@ -151,30 +178,29 @@ with st.form("form_destino_manual"):
     agregar_destino = st.form_submit_button("Agregar destino")
 
 if agregar_destino:
-    nombre_destino = nombre_destino.strip()
+    nombre_limpio = nombre_destino.strip()
+    nombres_existentes = destinos_excel + [d["Destino"] for d in st.session_state.destinos_manuales]
 
-    if nombre_destino == "":
+    if nombre_limpio == "":
         st.warning("Ingresá un nombre")
-    elif nombre_destino in destinos_excel or nombre_destino in [d["Destino"] for d in st.session_state.destinos_manuales]:
+    elif nombre_limpio in nombres_existentes:
         st.warning("Ese destino ya existe")
     else:
-        try:
-            esperar_si_hace_falta(1.0)
+        with st.spinner("Calculando distancia..."):
             km_manual = distancia_osrm(lat_campo, lon_campo, lat_dest, lon_dest)
 
-            if km_manual is not None:
-                st.session_state.destinos_manuales.append({
-                    "Destino": nombre_destino,
-                    "Km": km_manual
-                })
-                st.success(f"Destino agregado: {round(km_manual, 1)} km")
-            else:
-                st.error("No se pudo calcular la distancia")
-        except Exception as e:
-            st.error(f"Error calculando distancia: {e}")
+        if km_manual is not None:
+            st.session_state.destinos_manuales.append({
+                "Destino": nombre_limpio,
+                "Km": km_manual
+            })
+            st.success(f"Destino agregado: {round(km_manual, 1)} km")
+        else:
+            st.error("No se pudo calcular la distancia. Probá de nuevo en unos segundos.")
+
 
 # =========================
-# Destinos a comparar
+# Unificar destinos
 # =========================
 destinos_manual = [d["Destino"] for d in st.session_state.destinos_manuales]
 
@@ -182,6 +208,7 @@ destinos = st.multiselect(
     "Destinos a comparar",
     options=destinos_excel + destinos_manual
 )
+
 
 # =========================
 # Parámetros por destino
@@ -191,9 +218,9 @@ st.markdown("### ⚙️ Configuración por destino")
 for destino in destinos:
     if destino not in st.session_state.param_destinos:
         st.session_state.param_destinos[destino] = {
-            "paritaria": paritaria_base,
-            "secada": secada_base,
-            "comision": comision_base,
+            "paritaria": float(paritaria_base),
+            "secada": float(secada_base),
+            "comision": float(comision_base),
             "contraflete": 0.0
         }
 
@@ -225,59 +252,75 @@ for destino in destinos:
             key=f"cf_{destino}"
         )
 
+
 # =========================
-# Cálculo solo con botón
+# Botón de cálculo
 # =========================
 st.markdown("---")
-calcular = st.button("Calcular comparación")
+calcular = st.button("Calcular comparación", type="primary")
 
 if calcular:
-    tarifas_filtradas = tarifas[tarifas["CATAC"] == catac]
-    resultados = []
-
-    for destino in destinos:
-        if destino in df_campo["Destino"].values:
-            km = float(df_campo[df_campo["Destino"] == destino].iloc[0]["Km"])
-        else:
-            km = next(
-                d["Km"]
-                for d in st.session_state.destinos_manuales
-                if d["Destino"] == destino
-            )
-
-        importe_ars = buscar_importe_por_km(km, tarifas_filtradas)
-
-        if tipo_catac == "CATAC con descuento":
-            importe_ars *= (1 - descuento_pct / 100)
-
-        flete_usd = importe_ars / tipo_cambio
-        p = st.session_state.param_destinos[destino]
-
-        precio_neto = (
-            precio
-            - flete_usd
-            - p["paritaria"]
-            - p["secada"]
-            - p["contraflete"]
-            - (precio * p["comision"])
-        )
-
-        resultados.append({
-            "Destino": destino,
-            "Km": round(km, 1),
-            "Flete USD": round(flete_usd, 2),
-            "Precio Neto": round(precio_neto, 2),
-        })
-
-    if resultados:
-        df_res = pd.DataFrame(resultados)
-        df_res = df_res.sort_values("Precio Neto", ascending=False).reset_index(drop=True)
-
-        mejor = df_res.iloc[0]["Precio Neto"]
-        df_res["Ahorro vs mejor USD"] = (mejor - df_res["Precio Neto"]).round(2)
-
-        st.subheader("Comparación de destinos")
-        st.dataframe(df_res, use_container_width=True, hide_index=True)
-        st.success(f"Mejor destino: {df_res.iloc[0]['Destino']}")
+    if not destinos:
+        st.warning("Seleccioná al menos un destino.")
     else:
-        st.warning("Seleccioná al menos un destino")
+        tarifas_filtradas = tarifas[tarifas["CATAC"] == catac]
+
+        if tarifas_filtradas.empty:
+            st.error("No hay tarifas para la escala CATAC seleccionada.")
+        else:
+            resultados = []
+
+            for destino in destinos:
+                if destino in df_campo["Destino"].values:
+                    km = float(df_campo[df_campo["Destino"] == destino].iloc[0]["Km"])
+                else:
+                    km = next(
+                        d["Km"]
+                        for d in st.session_state.destinos_manuales
+                        if d["Destino"] == destino
+                    )
+
+                importe_ars = buscar_importe_por_km(km, tarifas_filtradas)
+
+                if tipo_catac == "CATAC con descuento":
+                    importe_ars *= (1 - descuento_pct / 100)
+
+                flete_usd = importe_ars / tipo_cambio
+                p = st.session_state.param_destinos[destino]
+
+                precio_neto = (
+                    precio
+                    - flete_usd
+                    - p["paritaria"]
+                    - p["secada"]
+                    - p["contraflete"]
+                    - (precio * p["comision"])
+                )
+
+                resultados.append({
+                    "Destino": destino,
+                    "Km": round(km, 1),
+                    "Flete USD": round(flete_usd, 2),
+                    "Precio Neto": round(precio_neto, 2)
+                })
+
+            df_res = pd.DataFrame(resultados)
+            df_res = df_res.sort_values("Precio Neto", ascending=False).reset_index(drop=True)
+
+            mejor = df_res.iloc[0]["Precio Neto"]
+            df_res["Ahorro vs mejor USD"] = (mejor - df_res["Precio Neto"]).round(2)
+
+            st.session_state.resultados = df_res
+
+
+# =========================
+# Mostrar resultados persistentes
+# =========================
+if st.session_state.resultados is not None:
+    df_res = st.session_state.resultados
+
+    st.subheader("Comparación de destinos")
+    st.dataframe(df_res, use_container_width=True, hide_index=True)
+
+    if not df_res.empty:
+        st.success(f"Mejor destino: {df_res.iloc[0]['Destino']}")
