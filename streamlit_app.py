@@ -6,7 +6,7 @@ import requests
 st.set_page_config(page_title="Simulador logístico", layout="wide")
 
 # =========================
-# Cargar Excel (cacheado)
+# Cargar Excel
 # =========================
 @st.cache_data
 def cargar_datos():
@@ -43,7 +43,7 @@ def buscar_importe_por_km(km, tabla_tarifas):
 
 
 # =========================
-# Función OSRM robusta
+# Función OSRM
 # =========================
 @st.cache_data(ttl=86400, show_spinner=False)
 def distancia_osrm(lat1, lon1, lat2, lon2):
@@ -89,7 +89,7 @@ except Exception as e:
 
 
 # =========================
-# Estado
+# Session state
 # =========================
 if "destinos_manuales" not in st.session_state:
     st.session_state.destinos_manuales = []
@@ -159,15 +159,16 @@ else:
 
 
 # =========================
-# Destinos
+# Destinos existentes
 # =========================
 destinos_excel = sorted(df_campo["Destino"].dropna().unique())
 
 st.markdown("---")
-st.info("👉 Si el destino ya está en la lista, NO cargar manual")
+st.info("👉 Si el destino ya está en la lista, no cargar manualmente")
+
 
 # =========================
-# Destino manual con form
+# Agregar destino nuevo
 # =========================
 st.subheader("➕ Agregar destino nuevo")
 
@@ -179,7 +180,10 @@ with st.form("form_destino_manual"):
 
 if agregar_destino:
     nombre_limpio = nombre_destino.strip()
-    nombres_existentes = destinos_excel + [d["Destino"] for d in st.session_state.destinos_manuales]
+
+    nombres_existentes = destinos_excel + [
+        d["Destino"] for d in st.session_state.destinos_manuales
+    ]
 
     if nombre_limpio == "":
         st.warning("Ingresá un nombre")
@@ -196,7 +200,10 @@ if agregar_destino:
             })
             st.success(f"Destino agregado: {round(km_manual, 1)} km")
         else:
-            st.error("No se pudo calcular la distancia. Probá de nuevo en unos segundos.")
+            st.error(
+                "No se pudo calcular la distancia con el servidor de rutas. "
+                "Probá de nuevo en unos segundos."
+            )
 
 
 # =========================
@@ -254,7 +261,7 @@ for destino in destinos:
 
 
 # =========================
-# Botón de cálculo
+# Cálculo
 # =========================
 st.markdown("---")
 calcular = st.button("Calcular comparación", type="primary")
@@ -314,7 +321,7 @@ if calcular:
 
 
 # =========================
-# Mostrar resultados persistentes
+# Mostrar resultados
 # =========================
 if st.session_state.resultados is not None:
     df_res = st.session_state.resultados
