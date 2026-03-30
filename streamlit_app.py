@@ -222,6 +222,7 @@ st.markdown("### ⚙️ Configuración por destino")
 for destino in destinos:
     if destino not in st.session_state.param_destinos:
         st.session_state.param_destinos[destino] = {
+            "precio": float(precio),
             "paritaria": float(paritaria_base),
             "secada": float(secada_base),
             "comision": float(comision_base),
@@ -231,6 +232,7 @@ for destino in destinos:
     with st.expander(destino):
         p = st.session_state.param_destinos[destino]
 
+        p["precio"] = st.number_input("Precio USD", value=p["precio"], key=f"pr_{destino}")
         p["paritaria"] = st.number_input("Paritaria", value=p["paritaria"], key=f"p_{destino}")
         p["secada"] = st.number_input("Secada", value=p["secada"], key=f"s_{destino}")
 
@@ -270,23 +272,24 @@ if calcular:
             p = st.session_state.param_destinos[destino]
 
             precio_neto = (
-                precio
+                p["precio"]
                 - flete_usd
                 - p["paritaria"]
                 - p["secada"]
                 - p["contraflete"]
-                - (precio * p["comision"])
+                - (p["precio"] * p["comision"])
             )
 
             # ✅ GASTO COMERCIAL
-            if precio != 0:
-                gasto_comercial = (precio - precio_neto) / precio
+            if p["precio"] != 0:
+                gasto_comercial = (p["precio"] - precio_neto) / p["precio"]
             else:
                 gasto_comercial = 0
 
             resultados.append({
                 "Destino": destino,
                 "Km": round(km, 1),
+                "Precio USD": round(p["precio"], 2),
                 "Flete USD": round(flete_usd, 2),
                 "Precio Neto": round(precio_neto, 2),
                 "Gasto Comercial %": round(gasto_comercial * 100, 2)
