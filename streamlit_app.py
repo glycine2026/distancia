@@ -220,6 +220,7 @@ destinos = st.multiselect(
 st.markdown("### ⚙️ Configuración por destino")
 
 for destino in destinos:
+    # Inicializar param_destinos si no existe
     if destino not in st.session_state.param_destinos:
         st.session_state.param_destinos[destino] = {
             "precio": float(precio),
@@ -228,18 +229,32 @@ for destino in destinos:
             "comision": float(comision_base),
             "contraflete": 0.0
         }
+    else:
+        # Parche para destinos que ya existían sin la clave "precio"
+        if "precio" not in st.session_state.param_destinos[destino]:
+            st.session_state.param_destinos[destino]["precio"] = float(precio)
+
+    p = st.session_state.param_destinos[destino]
+
+    # Pre-inicializar los keys de widgets en session_state ANTES de renderizar
+    # Esto garantiza que Streamlit tome el valor correcto la primera vez
+    if f"pr_{destino}" not in st.session_state:
+        st.session_state[f"pr_{destino}"] = float(p["precio"])
+    if f"p_{destino}" not in st.session_state:
+        st.session_state[f"p_{destino}"] = float(p["paritaria"])
+    if f"s_{destino}" not in st.session_state:
+        st.session_state[f"s_{destino}"] = float(p["secada"])
+    if f"c_{destino}" not in st.session_state:
+        st.session_state[f"c_{destino}"] = float(p["comision"] * 100)
+    if f"cf_{destino}" not in st.session_state:
+        st.session_state[f"cf_{destino}"] = float(p["contraflete"])
 
     with st.expander(destino):
-        p = st.session_state.param_destinos[destino]
-
-        p["precio"] = st.number_input("Precio USD", value=p["precio"], key=f"pr_{destino}")
-        p["paritaria"] = st.number_input("Paritaria", value=p["paritaria"], key=f"p_{destino}")
-        p["secada"] = st.number_input("Secada", value=p["secada"], key=f"s_{destino}")
-
-        com_pct = st.number_input("Comisión %", value=p["comision"]*100, key=f"c_{destino}")
-        p["comision"] = com_pct / 100
-
-        p["contraflete"] = st.number_input("Contraflete USD", value=p["contraflete"], key=f"cf_{destino}")
+        st.number_input("Precio USD",      key=f"pr_{destino}")
+        st.number_input("Paritaria",       key=f"p_{destino}")
+        st.number_input("Secada",          key=f"s_{destino}")
+        st.number_input("Comisión %",      key=f"c_{destino}")
+        st.number_input("Contraflete USD", key=f"cf_{destino}")
 
 
 # =========================
@@ -269,27 +284,33 @@ if calcular:
                 importe_ars *= (1 - descuento_pct / 100)
 
             flete_usd = importe_ars / tipo_cambio
-            p = st.session_state.param_destinos[destino]
+
+            # Leer valores directo desde los keys de los widgets
+            precio_dest      = float(st.session_state[f"pr_{destino}"])
+            paritaria_dest   = float(st.session_state[f"p_{destino}"])
+            secada_dest      = float(st.session_state[f"s_{destino}"])
+            comision_dest    = float(st.session_state[f"c_{destino}"]) / 100
+            contraflete_dest = float(st.session_state[f"cf_{destino}"])
 
             precio_neto = (
-                p["precio"]
+                precio_dest
                 - flete_usd
-                - p["paritaria"]
-                - p["secada"]
-                - p["contraflete"]
-                - (p["precio"] * p["comision"])
+                - paritaria_dest
+                - secada_dest
+                - contraflete_dest
+                - (precio_dest * comision_dest)
             )
 
             # ✅ GASTO COMERCIAL
-            if p["precio"] != 0:
-                gasto_comercial = (p["precio"] - precio_neto) / p["precio"]
+            if precio_dest != 0:
+                gasto_comercial = (precio_dest - precio_neto) / precio_dest
             else:
                 gasto_comercial = 0
 
             resultados.append({
                 "Destino": destino,
                 "Km": round(km, 1),
-                "Precio USD": round(p["precio"], 2),
+                "Precio USD": round(precio_dest, 2),
                 "Flete USD": round(flete_usd, 2),
                 "Precio Neto": round(precio_neto, 2),
                 "Gasto Comercial %": round(gasto_comercial * 100, 2)
