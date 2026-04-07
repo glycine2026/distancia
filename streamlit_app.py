@@ -222,18 +222,17 @@ st.markdown("### ⚙️ Configuración por destino")
 for destino in destinos:
     if destino not in st.session_state.param_destinos:
         st.session_state.param_destinos[destino] = {
-            "precio":       float(precio),
-            "paritaria":    float(paritaria_base),
-            "secada":       float(secada_base),
-            "comision":     float(comision_base),
-            "flete_manual": 0.0,
-            "contraflete":  0.0
+            "precio":      float(precio),
+            "paritaria":   float(paritaria_base),
+            "secada":      float(secada_base),
+            "comision":    float(comision_base),
+            "contraflete": 0.0
         }
     else:
         if "precio" not in st.session_state.param_destinos[destino]:
             st.session_state.param_destinos[destino]["precio"] = float(precio)
-        if "flete_manual" not in st.session_state.param_destinos[destino]:
-            st.session_state.param_destinos[destino]["flete_manual"] = 0.0
+        # Limpiar clave vieja si existía
+        st.session_state.param_destinos[destino].pop("flete_manual", None)
 
     p = st.session_state.param_destinos[destino]
 
@@ -245,18 +244,15 @@ for destino in destinos:
         st.session_state[f"s_{destino}"] = float(p["secada"])
     if f"c_{destino}" not in st.session_state:
         st.session_state[f"c_{destino}"] = float(p["comision"] * 100)
-    if f"fm_{destino}" not in st.session_state:
-        st.session_state[f"fm_{destino}"] = float(p["flete_manual"])
     if f"cf_{destino}" not in st.session_state:
         st.session_state[f"cf_{destino}"] = float(p["contraflete"])
 
     with st.expander(destino):
-        st.number_input("Precio USD",        key=f"pr_{destino}")
-        st.number_input("Paritaria",         key=f"p_{destino}")
-        st.number_input("Secada",            key=f"s_{destino}")
-        st.number_input("Comisión %",        key=f"c_{destino}")
-        st.number_input("Flete manual USD",  key=f"fm_{destino}")
-        st.number_input("Contraflete USD",   key=f"cf_{destino}")
+        st.number_input("Precio USD",      key=f"pr_{destino}")
+        st.number_input("Paritaria",       key=f"p_{destino}")
+        st.number_input("Secada",          key=f"s_{destino}")
+        st.number_input("Comisión %",      key=f"c_{destino}")
+        st.number_input("Contraflete USD", key=f"cf_{destino}")
 
 
 # =========================
@@ -285,17 +281,16 @@ if calcular:
             if tipo_catac == "CATAC con descuento":
                 importe_ars *= (1 - descuento_pct / 100)
 
-            flete_catac_usd = importe_ars / tipo_cambio
+            flete_usd = importe_ars / tipo_cambio
 
-            precio_dest       = float(st.session_state[f"pr_{destino}"])
-            paritaria_dest    = float(st.session_state[f"p_{destino}"])
-            secada_dest       = float(st.session_state[f"s_{destino}"])
-            comision_dest     = float(st.session_state[f"c_{destino}"]) / 100
-            flete_manual_dest = float(st.session_state[f"fm_{destino}"])
-            contraflete_dest  = float(st.session_state[f"cf_{destino}"])
+            precio_dest      = float(st.session_state[f"pr_{destino}"])
+            paritaria_dest   = float(st.session_state[f"p_{destino}"])
+            secada_dest      = float(st.session_state[f"s_{destino}"])
+            comision_dest    = float(st.session_state[f"c_{destino}"]) / 100
+            contraflete_dest = float(st.session_state[f"cf_{destino}"])
 
             comision_usd    = precio_dest * comision_dest
-            flete_total_usd = flete_catac_usd + flete_manual_dest + contraflete_dest
+            flete_total_usd = flete_usd + contraflete_dest
 
             precio_neto = (
                 precio_dest
@@ -314,8 +309,7 @@ if calcular:
                 "Destino":           destino,
                 "Km":                round(km, 1),
                 "Precio USD":        round(precio_dest, 2),
-                "Flete CATAC USD":   round(flete_catac_usd, 2),
-                "Flete Manual USD":  round(flete_manual_dest, 2),
+                "Flete USD":         round(flete_usd, 2),
                 "Contraflete USD":   round(contraflete_dest, 2),
                 "Flete Total USD":   round(flete_total_usd, 2),
                 "Paritaria":         round(paritaria_dest, 2),
