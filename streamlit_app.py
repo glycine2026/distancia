@@ -231,7 +231,6 @@ for destino in destinos:
     else:
         if "precio" not in st.session_state.param_destinos[destino]:
             st.session_state.param_destinos[destino]["precio"] = float(precio)
-        # Limpiar clave vieja si existía
         st.session_state.param_destinos[destino].pop("flete_manual", None)
 
     p = st.session_state.param_destinos[destino]
@@ -335,7 +334,24 @@ if st.session_state.resultados is not None:
     df_res = st.session_state.resultados
 
     st.subheader("Comparación de destinos")
-    st.dataframe(df_res, use_container_width=True, hide_index=True)
+    st.dataframe(
+        df_res,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Km":                  st.column_config.NumberColumn("Km",                  format="%.1f km"),
+            "Precio USD":          st.column_config.NumberColumn("Precio USD",          format="U$S %.2f"),
+            "Flete USD":           st.column_config.NumberColumn("Flete USD",           format="U$S %.2f"),
+            "Contraflete USD":     st.column_config.NumberColumn("Contraflete USD",     format="U$S %.2f"),
+            "Flete Total USD":     st.column_config.NumberColumn("Flete Total USD",     format="U$S %.2f"),
+            "Paritaria":           st.column_config.NumberColumn("Paritaria",           format="U$S %.2f"),
+            "Secada":              st.column_config.NumberColumn("Secada",              format="U$S %.2f"),
+            "Comisión USD":        st.column_config.NumberColumn("Comisión USD",        format="U$S %.2f"),
+            "Precio Neto":         st.column_config.NumberColumn("Precio Neto",         format="U$S %.2f"),
+            "Gasto Comercial %":   st.column_config.NumberColumn("Gasto Comercial %",   format="%.2f %%"),
+            "Ahorro vs mejor USD": st.column_config.NumberColumn("Ahorro vs mejor USD", format="U$S %.2f"),
+        }
+    )
 
     if not df_res.empty:
         st.success(f"Mejor destino: {df_res.iloc[0]['Destino']}")
