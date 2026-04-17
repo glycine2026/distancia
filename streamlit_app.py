@@ -26,6 +26,9 @@ def cargar_datos():
     df = df.dropna(subset=["Campo", "Destino", "Km"])
     tarifas = tarifas.dropna(subset=["CATAC", "Kilómetros", "Importe"])
 
+    if "Localidad" in df.columns:
+        df["Localidad"] = df["Localidad"].str.strip()
+
     return df, tarifas
 
 
@@ -100,6 +103,9 @@ if "param_destinos" not in st.session_state:
 if "resultados" not in st.session_state:
     st.session_state.resultados = None
 
+if "resultados_localidad" not in st.session_state:
+    st.session_state.resultados_localidad = None
+
 
 # =========================
 # Sidebar
@@ -150,12 +156,14 @@ if df_campo.empty:
 fila_campo = df_campo.iloc[0]
 lat_campo = fila_campo["Lat"]
 lon_campo = fila_campo["Lon"]
+localidad_campo = fila_campo["Localidad"] if "Localidad" in df_campo.columns else None
 
 if pd.isna(lat_campo) or pd.isna(lon_campo):
     st.error("⚠️ Campo sin coordenadas")
     st.stop()
 else:
-    st.caption(f"📍 Campo: {round(lat_campo, 4)}, {round(lon_campo, 4)}")
+    loc_texto = f" | 📌 Localidad: {localidad_campo}" if localidad_campo and not pd.isna(localidad_campo) else ""
+    st.caption(f"📍 Campo: {round(lat_campo, 4)}, {round(lon_campo, 4)}{loc_texto}")
 
 
 # =========================
@@ -326,9 +334,82 @@ if calcular:
 
         st.session_state.resultados = df_res
 
+        # =========================
+        # Cálculo por localidad
+        # =========================
+        if "Localidad" in df.columns and localidad_campo and not pd.isna(localidad_campo):
+
+            resultados_loc = []
+
+            for destino in destinos:
+
+                df_loc_dest = df[
+                    (df["Localidad"] == localidad_campo) &
+                    (df["Destino"] == destino)
+                ]
+
+                if df_loc_dest.empty:
+                    continue
+
+                # Calcular flete por cada campo con la CATAC seleccionada y promediar
+                fletes = []
+                for _, fila in df_loc_dest.iterrows():
+                    km_loc = fila["Km"]
+                    if pd.isna(km_loc):
+                        continue
+                    imp = buscar_importe_por_km(km_loc, tarifas_filtradas)
+                    if tipo_catac == "CATAC con descuento":
+                        imp *= (1 - descuento_pct / 100)
+                    fletes.append(imp / tipo_cambio)
+
+                if not fletes:
+                    continue
+
+                flete_prom_usd  = sum(fletes) / len(fletes)
+                comision_usd_loc = precio * comision_base
+                flete_total_loc  = flete_prom_usd  # sin contraflete a nivel localidad
+
+                precio_neto_loc = (
+                    precio
+                    - flete_total_loc
+                    - paritaria_base
+                    - secada_base
+                    - comision_usd_loc
+                )
+
+                if precio != 0:
+                    gasto_comercial_loc = (precio - precio_neto_loc) / precio
+                else:
+                    gasto_comercial_loc = 0
+
+                resultados_loc.append({
+                    "Localidad":          localidad_campo,
+                    "Destino":            destino,
+                    "Campos promediados": len(fletes),
+                    "Precio USD":         round(precio, 2),
+                    "Flete Prom. USD":    round(flete_prom_usd, 2),
+                    "Flete Total USD":    round(flete_total_loc, 2),
+                    "Paritaria":          round(paritaria_base, 2),
+                    "Secada":             round(secada_base, 2),
+                    "Comisión USD":       round(comision_usd_loc, 2),
+                    "Precio Neto":        round(precio_neto_loc, 2),
+                    "Gasto Comercial %":  round(gasto_comercial_loc * 100, 2)
+                })
+
+            if resultados_loc:
+                df_loc = pd.DataFrame(resultados_loc)
+                df_loc = df_loc.sort_values("Precio Neto", ascending=False).reset_index(drop=True)
+                mejor_loc = df_loc.iloc[0]["Precio Neto"]
+                df_loc["Ahorro vs mejor USD"] = (mejor_loc - df_loc["Precio Neto"]).round(2)
+                st.session_state.resultados_localidad = df_loc
+            else:
+                st.session_state.resultados_localidad = None
+        else:
+            st.session_state.resultados_localidad = None
+
 
 # =========================
-# Mostrar resultados
+# Mostrar resultados campo
 # =========================
 if st.session_state.resultados is not None:
     df_res = st.session_state.resultados
@@ -355,3 +436,35 @@ if st.session_state.resultados is not None:
 
     if not df_res.empty:
         st.success(f"Mejor destino: {df_res.iloc[0]['Destino']}")
+
+
+# =========================
+# Mostrar resultados localidad
+# =========================
+if st.session_state.resultados_localidad is not None:
+    df_loc = st.session_state.resultados_localidad
+
+    st.markdown("---")
+    st.subheader(f"📌 Promedio por localidad: {df_loc.iloc[0]['Localidad']}")
+    st.caption("Flete promedio calculado sobre todos los campos de la localidad con la CATAC seleccionada")
+
+    st.dataframe(
+        df_loc,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Campos promediados":  st.column_config.NumberColumn("Campos"),
+            "Precio USD":          st.column_config.NumberColumn("Precio USD",          format="U$S %.2f"),
+            "Flete Prom. USD":     st.column_config.NumberColumn("Flete Prom. USD",     format="U$S %.2f"),
+            "Flete Total USD":     st.column_config.NumberColumn("Flete Total USD",     format="U$S %.2f"),
+            "Paritaria":           st.column_config.NumberColumn("Paritaria",           format="U$S %.2f"),
+            "Secada":              st.column_config.NumberColumn("Secada",              format="U$S %.2f"),
+            "Comisión USD":        st.column_config.NumberColumn("Comisión USD",        format="U$S %.2f"),
+            "Precio Neto":         st.column_config.NumberColumn("Precio Neto",         format="U$S %.2f"),
+            "Gasto Comercial %":   st.column_config.NumberColumn("Gasto Comercial %",   format="%.2f %%"),
+            "Ahorro vs mejor USD": st.column_config.NumberColumn("Ahorro vs mejor USD", format="U$S %.2f"),
+        }
+    )
+
+    if not df_loc.empty:
+        st.success(f"Mejor destino (localidad): {df_loc.iloc[0]['Destino']}")
