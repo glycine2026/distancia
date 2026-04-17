@@ -263,6 +263,20 @@ for destino in destinos:
 
 
 # =========================
+# Selección de localidades a comparar
+# =========================
+st.markdown("---")
+st.markdown("### 🏘️ Comparación por localidad")
+
+localidades_disponibles = sorted(df["Localidad"].dropna().unique()) if "Localidad" in df.columns else []
+
+localidades_seleccionadas = st.multiselect(
+    "Localidades a comparar",
+    options=localidades_disponibles
+)
+
+
+# =========================
 # Cálculo
 # =========================
 st.markdown("---")
@@ -274,6 +288,9 @@ if calcular:
     else:
         tarifas_filtradas = tarifas[tarifas["CATAC"] == catac]
 
+        # =========================
+        # Tabla por campo
+        # =========================
         resultados = []
 
         for destino in destinos:
@@ -328,78 +345,78 @@ if calcular:
 
         df_res = pd.DataFrame(resultados)
         df_res = df_res.sort_values("Precio Neto", ascending=False).reset_index(drop=True)
-
         mejor = df_res.iloc[0]["Precio Neto"]
         df_res["Ahorro vs mejor USD"] = (mejor - df_res["Precio Neto"]).round(2)
-
         st.session_state.resultados = df_res
 
         # =========================
-        # Cálculo por localidad
+        # Tabla por localidad
         # =========================
-        if "Localidad" in df.columns and localidad_campo and not pd.isna(localidad_campo):
+        if localidades_seleccionadas and "Localidad" in df.columns:
 
             resultados_loc = []
 
-            for destino in destinos:
+            for localidad in localidades_seleccionadas:
+                for destino in destinos:
 
-                df_loc_dest = df[
-                    (df["Localidad"] == localidad_campo) &
-                    (df["Destino"] == destino)
-                ]
+                    df_loc_dest = df[
+                        (df["Localidad"] == localidad) &
+                        (df["Destino"] == destino)
+                    ]
 
-                if df_loc_dest.empty:
-                    continue
-
-                # Calcular flete por cada campo con la CATAC seleccionada y promediar
-                fletes = []
-                for _, fila in df_loc_dest.iterrows():
-                    km_loc = fila["Km"]
-                    if pd.isna(km_loc):
+                    if df_loc_dest.empty:
                         continue
-                    imp = buscar_importe_por_km(km_loc, tarifas_filtradas)
-                    if tipo_catac == "CATAC con descuento":
-                        imp *= (1 - descuento_pct / 100)
-                    fletes.append(imp / tipo_cambio)
 
-                if not fletes:
-                    continue
+                    fletes = []
+                    for _, fila in df_loc_dest.iterrows():
+                        km_loc = fila["Km"]
+                        if pd.isna(km_loc):
+                            continue
+                        imp = buscar_importe_por_km(km_loc, tarifas_filtradas)
+                        if tipo_catac == "CATAC con descuento":
+                            imp *= (1 - descuento_pct / 100)
+                        fletes.append(imp / tipo_cambio)
 
-                flete_prom_usd  = sum(fletes) / len(fletes)
-                comision_usd_loc = precio * comision_base
-                flete_total_loc  = flete_prom_usd  # sin contraflete a nivel localidad
+                    if not fletes:
+                        continue
 
-                precio_neto_loc = (
-                    precio
-                    - flete_total_loc
-                    - paritaria_base
-                    - secada_base
-                    - comision_usd_loc
-                )
+                    flete_prom_usd   = sum(fletes) / len(fletes)
+                    comision_usd_loc = precio * comision_base
+                    flete_total_loc  = flete_prom_usd
 
-                if precio != 0:
-                    gasto_comercial_loc = (precio - precio_neto_loc) / precio
-                else:
-                    gasto_comercial_loc = 0
+                    precio_neto_loc = (
+                        precio
+                        - flete_total_loc
+                        - paritaria_base
+                        - secada_base
+                        - comision_usd_loc
+                    )
 
-                resultados_loc.append({
-                    "Localidad":          localidad_campo,
-                    "Destino":            destino,
-                    "Campos promediados": len(fletes),
-                    "Precio USD":         round(precio, 2),
-                    "Flete Prom. USD":    round(flete_prom_usd, 2),
-                    "Flete Total USD":    round(flete_total_loc, 2),
-                    "Paritaria":          round(paritaria_base, 2),
-                    "Secada":             round(secada_base, 2),
-                    "Comisión USD":       round(comision_usd_loc, 2),
-                    "Precio Neto":        round(precio_neto_loc, 2),
-                    "Gasto Comercial %":  round(gasto_comercial_loc * 100, 2)
-                })
+                    if precio != 0:
+                        gasto_comercial_loc = (precio - precio_neto_loc) / precio
+                    else:
+                        gasto_comercial_loc = 0
+
+                    resultados_loc.append({
+                        "Localidad":          localidad,
+                        "Destino":            destino,
+                        "Campos promediados": len(fletes),
+                        "Precio USD":         round(precio, 2),
+                        "Flete Prom. USD":    round(flete_prom_usd, 2),
+                        "Flete Total USD":    round(flete_total_loc, 2),
+                        "Paritaria":          round(paritaria_base, 2),
+                        "Secada":             round(secada_base, 2),
+                        "Comisión USD":       round(comision_usd_loc, 2),
+                        "Precio Neto":        round(precio_neto_loc, 2),
+                        "Gasto Comercial %":  round(gasto_comercial_loc * 100, 2)
+                    })
 
             if resultados_loc:
                 df_loc = pd.DataFrame(resultados_loc)
-                df_loc = df_loc.sort_values("Precio Neto", ascending=False).reset_index(drop=True)
-                mejor_loc = df_loc.iloc[0]["Precio Neto"]
+                df_loc = df_loc.sort_values(
+                    ["Localidad", "Precio Neto"], ascending=[True, False]
+                ).reset_index(drop=True)
+                mejor_loc = df_loc["Precio Neto"].max()
                 df_loc["Ahorro vs mejor USD"] = (mejor_loc - df_loc["Precio Neto"]).round(2)
                 st.session_state.resultados_localidad = df_loc
             else:
@@ -445,8 +462,8 @@ if st.session_state.resultados_localidad is not None:
     df_loc = st.session_state.resultados_localidad
 
     st.markdown("---")
-    st.subheader(f"📌 Promedio por localidad: {df_loc.iloc[0]['Localidad']}")
-    st.caption("Flete promedio calculado sobre todos los campos de la localidad con la CATAC seleccionada")
+    st.subheader("📌 Comparación por localidad")
+    st.caption("Flete promedio calculado sobre todos los campos de cada localidad con la CATAC seleccionada")
 
     st.dataframe(
         df_loc,
@@ -466,5 +483,5 @@ if st.session_state.resultados_localidad is not None:
         }
     )
 
-    if not df_loc.empty:
-        st.success(f"Mejor destino (localidad): {df_loc.iloc[0]['Destino']}")
+    mejor_fila = df_loc.loc[df_loc["Precio Neto"].idxmax()]
+    st.success(f"Mejor combinación: {mejor_fila['Localidad']} → {mejor_fila['Destino']}")
